@@ -6,6 +6,13 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		C52BF91D2E6A252F007C3F29 /* FirebaseAI in Frameworks */ = {isa = PBXBuildFile; productRef = C52BF91C2E6A252F007C3F29 /* FirebaseAI */; };
+		C52BF91F2E6A252F007C3F29 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = C52BF91E2E6A252F007C3F29 /* FirebaseAnalytics */; };
+		C52BF9212E6A252F007C3F29 /* FirebaseAnalyticsCore in Frameworks */ = {isa = PBXBuildFile; productRef = C52BF9202E6A252F007C3F29 /* FirebaseAnalyticsCore */; };
+		C52BF9232E6A252F007C3F29 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = C52BF9222E6A252F007C3F29 /* FirebaseAppCheck */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		C52BF8F92E6A1774007C3F29 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -29,9 +36,30 @@
 		C52BF9022E6A1774007C3F29 /* Lock InUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Lock InUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		C52BF9192E6A243A007C3F29 /* Exceptions for "Lock In" folder in "Lock InTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"GoogleService-Info.plist",
+			);
+			target = C52BF8F72E6A1774007C3F29 /* Lock InTests */;
+		};
+		C52BF91A2E6A243A007C3F29 /* Exceptions for "Lock In" folder in "Lock InUITests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"GoogleService-Info.plist",
+			);
+			target = C52BF9012E6A1774007C3F29 /* Lock InUITests */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		C52BF8ED2E6A1773007C3F29 /* Lock In */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C52BF9192E6A243A007C3F29 /* Exceptions for "Lock In" folder in "Lock InTests" target */,
+				C52BF91A2E6A243A007C3F29 /* Exceptions for "Lock In" folder in "Lock InUITests" target */,
+			);
 			path = "Lock In";
 			sourceTree = "<group>";
 		};
@@ -52,6 +80,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C52BF9232E6A252F007C3F29 /* FirebaseAppCheck in Frameworks */,
+				C52BF91F2E6A252F007C3F29 /* FirebaseAnalytics in Frameworks */,
+				C52BF9212E6A252F007C3F29 /* FirebaseAnalyticsCore in Frameworks */,
+				C52BF91D2E6A252F007C3F29 /* FirebaseAI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +144,10 @@
 			);
 			name = "Lock In";
 			packageProductDependencies = (
+				C52BF91C2E6A252F007C3F29 /* FirebaseAI */,
+				C52BF91E2E6A252F007C3F29 /* FirebaseAnalytics */,
+				C52BF9202E6A252F007C3F29 /* FirebaseAnalyticsCore */,
+				C52BF9222E6A252F007C3F29 /* FirebaseAppCheck */,
 			);
 			productName = "Lock In";
 			productReference = C52BF8EB2E6A1773007C3F29 /* Lock In.app */;
@@ -195,6 +231,9 @@
 			);
 			mainGroup = C52BF8E22E6A1773007C3F29;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C52BF91B2E6A252F007C3F29 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C52BF8EC2E6A1773007C3F29 /* Products */;
 			projectDirPath = "";
@@ -550,6 +589,40 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C52BF91B2E6A252F007C3F29 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.2.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C52BF91C2E6A252F007C3F29 /* FirebaseAI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C52BF91B2E6A252F007C3F29 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAI;
+		};
+		C52BF91E2E6A252F007C3F29 /* FirebaseAnalytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C52BF91B2E6A252F007C3F29 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalytics;
+		};
+		C52BF9202E6A252F007C3F29 /* FirebaseAnalyticsCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C52BF91B2E6A252F007C3F29 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalyticsCore;
+		};
+		C52BF9222E6A252F007C3F29 /* FirebaseAppCheck */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C52BF91B2E6A252F007C3F29 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAppCheck;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = C52BF8E32E6A1773007C3F29 /* Project object */;
 }
