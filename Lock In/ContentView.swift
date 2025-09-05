@@ -1,19 +1,26 @@
 //
 //  ContentView.swift
-//  Lock In
-//
-//  Created by Ayane Yokoya on 9/4/25.
 //
 
 import SwiftUI
+import UIKit
 import FirebaseFirestore
 
 // MARK: - Domain Model
-struct TaskItem: Identifiable, Codable {
-    @DocumentID var id: String?
+struct TaskItem: Identifiable, Codable, Equatable {
+    var id: String?
     var title: String
     var isDone: Bool = false
     var createdAt: Date = .now
+    var details: String? = nil
+
+    static func == (lhs: TaskItem, rhs: TaskItem) -> Bool {
+        lhs.id == rhs.id &&
+        lhs.title == rhs.title &&
+        lhs.isDone == rhs.isDone &&
+        lhs.createdAt == rhs.createdAt &&
+        lhs.details == rhs.details
+    }
 }
 
 // MARK: - Firestore Store
@@ -39,25 +46,70 @@ final class TaskStore: ObservableObject {
                     print("Snapshot error: \(error?.localizedDescription ?? "unknown")")
                     return
                 }
-                self?.tasks = docs.compactMap { try? $0.data(as: TaskItem.self) }
+                self?.tasks = docs.compactMap { doc in
+                    let data = doc.data()
+                    let title = (data["title"] as? String) ?? ""
+                    let isDone = (data["isDone"] as? Bool) ?? false
+
+                    var created = Date()
+                    if let ts = data["createdAt"] as? Timestamp {
+                        created = ts.dateValue()
+                    } else if let d = data["createdAt"] as? Date {
+                        created = d
+                    }
+
+                    let details = data["details"] as? String
+
+                    return TaskItem(
+                        id: doc.documentID,
+                        title: title,
+                        isDone: isDone,
+                        createdAt: created,
+                        details: details
+                    )
+                }
             }
     }
 
-    func add(_ title: String) {
+    func add(_ title: String, details: String?) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        let t = TaskItem(title: trimmed, isDone: false, createdAt: .now)
-        do {
-            _ = try db.collection("tasks").addDocument(from: t)
-        } catch {
-            print("Add failed: \(error)")
+
+        var payload: [String: Any] = [
+            "title": trimmed,
+            "isDone": false,
+            "createdAt": Timestamp(date: Date())
+        ]
+        if let d = details?.trimmingCharacters(in: .whitespacesAndNewlines), !d.isEmpty {
+            payload["details"] = d
+        }
+
+        db.collection("tasks").addDocument(data: payload) { err in
+            if let err = err { print("Add failed: \(err)") }
         }
     }
-
     func toggle(_ task: TaskItem) {
         guard let id = task.id else { return }
         db.collection("tasks").document(id).updateData(["isDone": !task.isDone]) { err in
             if let err = err { print("Toggle failed: \(err)") }
+        }
+    }
+
+    func updateTitle(_ task: TaskItem, to newTitle: String) {
+        guard let id = task.id else { return }
+        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != task.title else { return }
+        db.collection("tasks").document(id).updateData(["title": trimmed]) { err in
+            if let err = err { print("Update failed: \(err)") }
+        }
+    }
+
+    func updateDetails(_ task: TaskItem, to newDetails: String) {
+        guard let id = task.id else { return }
+        let trimmed = newDetails.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Allow empty string to clear details
+        db.collection("tasks").document(id).updateData(["details": trimmed]) { err in
+            if let err = err { print("Update details failed: \(err)") }
         }
     }
 
@@ -73,45 +125,324 @@ final class TaskStore: ObservableObject {
 struct ContentView: View {
     @StateObject private var store = TaskStore()
     @State private var newTitle: String = ""
+    @State private var newDetails: String = ""
+    @FocusState private var isTitleFocused: Bool
+    @State private var newDetailsHeight: CGFloat = 32
+
+    // Editing state
+    @State private var editingTask: TaskItem? = nil
+    @State private var editedTitle: String = ""
+
+    @State private var detailTask: TaskItem? = nil
+    @State private var detailEditedTitle: String = ""
+    @State private var detailEditedDetails: String = ""
+
+    // Controls whether the details box is visible (animated)
+    @State private var showDetails: Bool = false
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                HStack {
-                    TextField("Add a task...", text: $newTitle)
-                        .textFieldStyle(.roundedBorder)
-                        .submitLabel(.done)
-                        .onSubmit(add)
+            ZStack {
+                // Subtle gradient background for a modern look
+                LinearGradient(colors: [Color(.systemBackground), Color(.secondarySystemBackground)],
+                               startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
 
-                    Button("Add", action: add)
+                VStack(spacing: 12) {
+                    // Add bar
+                    HStack(spacing: 10) {
+                        TextField("Add a task…", text: $newTitle)
+                            .textFieldStyle(.roundedBorder)
+                            .submitLabel(.done)
+                            .onSubmit(add)
+                            .focused($isTitleFocused)
+                            .onChange(of: newTitle) { value in
+                                let shouldShow = !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                if shouldShow != showDetails {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        showDetails = shouldShow
+                                    }
+                                }
+                            }
+
+                        Button {
+                            add()
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.title3.weight(.semibold))
+                        }
                         .buttonStyle(.borderedProminent)
                         .disabled(newTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                .padding(.horizontal)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 4)
 
-                List {
-                    ForEach(store.tasks) { task in
-                        HStack {
-                            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
-                            Text(task.title)
-                                .strikethrough(task.isDone)
-                                .foregroundStyle(task.isDone ? .secondary : .primary)
+                    Group {
+                        if showDetails {
+                            ZStack(alignment: .topLeading) {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Color(.secondarySystemBackground))
+                                AutoGrowingTextEditor(text: $newDetails, calculatedHeight: $newDetailsHeight)
+                                    .padding(8)
+                                    .frame(height: max(32, newDetailsHeight))
+                                if newDetails.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    Text("Add details…")
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 10)
+                                }
+                            }
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(Color(.tertiaryLabel), lineWidth: 0.5)
+                            )
+                            .padding(.horizontal)
+                            .transition(.opacity)
                         }
-                        .contentShape(Rectangle())
-                        .onTapGesture { store.toggle(task) }
                     }
-                    .onDelete { idxSet in
-                        idxSet.map { store.tasks[$0] }.forEach { store.remove($0) }
+
+                    // Task list
+                    List {
+                        ForEach(store.tasks) { task in
+                            TaskRow(task: task,
+                                    onToggle: { store.toggle(task) },
+                                    onOpenDetails: {
+                                        detailTask = task
+                                        detailEditedTitle = task.title
+                                        detailEditedDetails = task.details ?? ""
+                                    })
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button {
+                                        editedTitle = task.title
+                                        editingTask = task
+                                    } label: { Label("Edit", systemImage: "pencil") }
+                                    .tint(.blue)
+
+                                    Button(role: .destructive) {
+                                        store.remove(task)
+                                    } label: { Label("Delete", systemImage: "trash") }
+                                }
+                        }
+                        .onDelete { idxSet in
+                            idxSet.map { store.tasks[$0] }.forEach { store.remove($0) }
+                        }
                     }
+                    .listStyle(.insetGrouped)
+                    .scrollContentBackground(.hidden) // show our gradient instead of list bg
                 }
             }
             .navigationTitle("Lock In")
         }
+        // Polished edit sheet
+        .sheet(item: $editingTask) { task in
+            EditTaskSheetModern(title: $editedTitle) {
+                store.updateTitle(task, to: editedTitle)
+            }
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $detailTask) { task in
+            TaskDetailsSheet(title: $detailEditedTitle, details: $detailEditedDetails) {
+                store.updateTitle(task, to: detailEditedTitle)
+                store.updateDetails(task, to: detailEditedDetails)
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private func add() {
-        store.add(newTitle)
+        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        store.add(trimmed, details: newDetails)
         newTitle = ""
+        newDetails = ""
+        isTitleFocused = false
+        showDetails = false
+    }
+}
+
+// MARK: - Row
+private struct TaskRow: View {
+    let task: TaskItem
+    let onToggle: () -> Void
+    let onOpenDetails: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button(action: onToggle) {
+                Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                    .font(.title2)
+                    .symbolRenderingMode(.hierarchical)
+            }
+            .buttonStyle(.plain)
+
+            Text(task.title)
+                .font(.body)
+                .lineLimit(2)
+                .strikethrough(task.isDone, pattern: .solid, color: .secondary)
+                .foregroundStyle(task.isDone ? .secondary : .primary)
+
+            Spacer(minLength: 8)
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .onTapGesture { onOpenDetails() }
+    }
+}
+
+// MARK: - Modern Edit Sheet View
+private struct EditTaskSheetModern: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var title: String
+    var onSave: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Title")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    TextField("Task title", text: $title)
+                        .textInputAutocapitalization(.sentences)
+                        .autocorrectionDisabled(false)
+                        .padding(12)
+                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .padding(.top, 8)
+
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Edit Task")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave()
+                        dismiss()
+                    }
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Task Details Sheet
+private struct TaskDetailsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var title: String
+    @Binding var details: String
+    var onSave: () -> Void
+
+    @State private var editorHeight: CGFloat = 90
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Title").font(.footnote).foregroundStyle(.secondary)
+                    TextField("Task title", text: $title)
+                        .textInputAutocapitalization(.sentences)
+                        .autocorrectionDisabled(false)
+                        .padding(12)
+                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Details").font(.footnote).foregroundStyle(.secondary)
+                    ZStack(alignment: .topLeading) {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(.secondarySystemBackground))
+                        AutoGrowingTextEditor(text: $details, calculatedHeight: $editorHeight)
+                            .padding(8)
+                            .frame(height: max(90, editorHeight))
+                        if details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text("Add more context, steps, or notes…")
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 14)
+                        }
+                    }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color(.tertiaryLabel), lineWidth: 0.5)
+                    )
+                }
+
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Task Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave()
+                        dismiss()
+                    }
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Auto-Growing TextEditor (UIKit-backed)
+private struct AutoGrowingTextEditor: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var calculatedHeight: CGFloat
+
+    func makeUIView(context: Context) -> UITextView {
+        let tv = UITextView()
+        tv.isScrollEnabled = false
+        tv.backgroundColor = .clear
+        tv.font = UIFont.preferredFont(forTextStyle: .body)
+        tv.delegate = context.coordinator
+        tv.textContainerInset = UIEdgeInsets(top: 2, left: 0, bottom: 2, right: 0)
+        tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return tv
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        if uiView.text != text {
+            uiView.text = text
+        }
+        Self.recalculateHeight(view: uiView, result: $calculatedHeight)
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, height: $calculatedHeight)
+    }
+
+    static func recalculateHeight(view: UITextView, result: Binding<CGFloat>) {
+        let newSize = view.sizeThatFits(CGSize(width: view.bounds.width, height: .greatestFiniteMagnitude))
+        if result.wrappedValue != newSize.height {
+            DispatchQueue.main.async {
+                result.wrappedValue = newSize.height
+            }
+        }
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var text: Binding<String>
+        var height: Binding<CGFloat>
+
+        init(text: Binding<String>, height: Binding<CGFloat>) {
+            self.text = text
+            self.height = height
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            self.text.wrappedValue = textView.text
+            AutoGrowingTextEditor.recalculateHeight(view: textView, result: height)
+        }
     }
 }
 
