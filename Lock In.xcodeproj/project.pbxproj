@@ -14,6 +14,7 @@
 		C52BF9252E6A2A18007C3F29 /* FirebaseDatabase in Frameworks */ = {isa = PBXBuildFile; productRef = C52BF9242E6A2A18007C3F29 /* FirebaseDatabase */; };
 		C52BF9272E6A2A18007C3F29 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = C52BF9262E6A2A18007C3F29 /* FirebaseFirestore */; };
 		C52BF9292E6A2B9D007C3F29 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = C52BF9282E6A2B9D007C3F29 /* FirebaseFunctions */; };
+		C52BF92D2E6AB8BC007C3F29 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = C52BF92C2E6AB8BC007C3F29 /* FirebaseAuth */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -90,6 +91,7 @@
 				C52BF9212E6A252F007C3F29 /* FirebaseAnalyticsCore in Frameworks */,
 				C52BF91D2E6A252F007C3F29 /* FirebaseAI in Frameworks */,
 				C52BF9272E6A2A18007C3F29 /* FirebaseFirestore in Frameworks */,
+				C52BF92D2E6AB8BC007C3F29 /* FirebaseAuth in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -157,6 +159,7 @@
 				C52BF9242E6A2A18007C3F29 /* FirebaseDatabase */,
 				C52BF9262E6A2A18007C3F29 /* FirebaseFirestore */,
 				C52BF9282E6A2B9D007C3F29 /* FirebaseFunctions */,
+				C52BF92C2E6AB8BC007C3F29 /* FirebaseAuth */,
 			);
 			productName = "Lock In";
 			productReference = C52BF8EB2E6A1773007C3F29 /* Lock In.app */;
@@ -645,6 +648,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C52BF91B2E6A252F007C3F29 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseFunctions;
+		};
+		C52BF92C2E6AB8BC007C3F29 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C52BF91B2E6A252F007C3F29 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

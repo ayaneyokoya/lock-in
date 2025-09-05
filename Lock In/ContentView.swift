@@ -119,6 +119,21 @@ final class TaskStore: ObservableObject {
             if let err = err { print("Delete failed: \(err)") }
         }
     }
+
+    func clearCompleted() {
+        let completed = tasks.filter { $0.isDone }
+        guard !completed.isEmpty else { return }
+        let batch = db.batch()
+        for t in completed {
+            if let id = t.id {
+                let ref = db.collection("tasks").document(id)
+                batch.deleteDocument(ref)
+            }
+        }
+        batch.commit { err in
+            if let err = err { print("Clear completed failed: \(err)") }
+        }
+    }
 }
 
 // MARK: - UI
@@ -129,6 +144,7 @@ struct ContentView: View {
     @FocusState private var isTitleFocused: Bool
     @State private var newDetailsHeight: CGFloat = 32
     @State private var showCompletedSection: Bool = false
+    @State private var showClearConfirm: Bool = false
     @State private var newDetailsFocused: Bool = false
 
     // Editing state
@@ -267,30 +283,47 @@ struct ContentView: View {
                                     .transition(.opacity.combined(with: .move(edge: .top)))
                                 }
                             } header: {
-                                Button {
-                                    withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
-                                        showCompletedSection.toggle()
+                                HStack(spacing: 8) {
+                                    Button {
+                                        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+                                            showCompletedSection.toggle()
+                                        }
+                                    } label: {
+                                        HStack(spacing: 8) {
+                                            Image(systemName: showCompletedSection ? "chevron.down" : "chevron.right")
+                                            Text("Completed")
+                                        }
                                     }
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: showCompletedSection ? "chevron.down" : "chevron.right")
-                                        Text("Completed")
-                                        Spacer()
-                                        Text("\(store.tasks.filter({ $0.isDone }).count)")
-                                            .font(.caption2).bold()
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(
-                                                Capsule().fill(Color(.tertiarySystemFill))
-                                            )
+                                    .buttonStyle(.plain)
+
+                                    Spacer()
+
+                                    Text("\(store.tasks.filter({ $0.isDone }).count)")
+                                        .font(.caption2).bold()
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(
+                                            Capsule().fill(Color(.tertiarySystemFill))
+                                        )
+
+                                    Button {
+                                        showClearConfirm = true
+                                    } label: {
+                                        Image(systemName: "trash")
+                                            .imageScale(.medium)
                                     }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("Clear completed")
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }
                     .listStyle(.insetGrouped)
                     .scrollContentBackground(.hidden) // show our gradient instead of list bg
+                    .confirmationDialog("Clear all completed tasks?", isPresented: $showClearConfirm, titleVisibility: .visible) {
+                        Button("Clear All", role: .destructive) { store.clearCompleted() }
+                        Button("Cancel", role: .cancel) {}
+                    }
                 }
             }
             .navigationTitle("Lock In")
