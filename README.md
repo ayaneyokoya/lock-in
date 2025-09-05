@@ -4,6 +4,10 @@
 ## Overview
 LockIn is a simple to-do list app built with SwiftUI. It uses Firebase to save tasks and handle login, so each user gets their own private task list that works across devices. Tasks live in `users/{uid}/tasks` inside Firestore.
 
+##  Demo Video
+
+https://github.com/user-attachments/assets/2743f9d9-7dce-45ae-a25b-f1db3f23fd2a
+
 
 ## Prerequisites
 - Xcode 15+ (with SwiftUI).
