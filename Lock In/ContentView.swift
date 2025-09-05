@@ -128,6 +128,8 @@ struct ContentView: View {
     @State private var newDetails: String = ""
     @FocusState private var isTitleFocused: Bool
     @State private var newDetailsHeight: CGFloat = 32
+    @State private var showCompletedSection: Bool = false
+    @State private var newDetailsFocused: Bool = false
 
     // Editing state
     @State private var editingTask: TaskItem? = nil
@@ -140,6 +142,11 @@ struct ContentView: View {
     // Controls whether the details box is visible (animated)
     @State private var showDetails: Bool = false
 
+    // Progress metrics
+    private var totalCount: Int { store.tasks.count }
+    private var doneCount: Int { store.tasks.filter { $0.isDone }.count }
+    private var progress: Double { totalCount == 0 ? 0 : Double(doneCount) / Double(totalCount) }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -149,6 +156,10 @@ struct ContentView: View {
                 .ignoresSafeArea()
 
                 VStack(spacing: 12) {
+                    if totalCount > 0 {
+                        ProgressHeader(done: doneCount, total: totalCount, progress: progress)
+                            .padding(.horizontal)
+                    }
                     // Add bar
                     HStack(spacing: 10) {
                         TextField("Add a task…", text: $newTitle)
@@ -156,8 +167,8 @@ struct ContentView: View {
                             .submitLabel(.done)
                             .onSubmit(add)
                             .focused($isTitleFocused)
-                            .onChange(of: newTitle) { value in
-                                let shouldShow = !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            .onChange(of: newTitle) { oldValue, newValue in
+                                let shouldShow = !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                 if shouldShow != showDetails {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         showDetails = shouldShow
@@ -182,7 +193,10 @@ struct ContentView: View {
                             ZStack(alignment: .topLeading) {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .fill(Color(.secondarySystemBackground))
-                                AutoGrowingTextEditor(text: $newDetails, calculatedHeight: $newDetailsHeight)
+                                AutoGrowingTextEditor(text: $newDetails,
+                                                      calculatedHeight: $newDetailsHeight,
+                                                      isFocused: $newDetailsFocused,
+                                                      maxHeight: 140)
                                     .padding(8)
                                     .frame(height: max(32, newDetailsHeight))
                                 if newDetails.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -190,6 +204,7 @@ struct ContentView: View {
                                         .foregroundStyle(.secondary)
                                         .padding(.horizontal, 14)
                                         .padding(.vertical, 10)
+                                        .allowsHitTesting(false)
                                 }
                             }
                             .overlay(
@@ -203,28 +218,75 @@ struct ContentView: View {
 
                     // Task list
                     List {
-                        ForEach(store.tasks) { task in
-                            TaskRow(task: task,
-                                    onToggle: { store.toggle(task) },
-                                    onOpenDetails: {
-                                        detailTask = task
-                                        detailEditedTitle = task.title
-                                        detailEditedDetails = task.details ?? ""
-                                    })
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button {
-                                        editedTitle = task.title
-                                        editingTask = task
-                                    } label: { Label("Edit", systemImage: "pencil") }
-                                    .tint(.blue)
-
-                                    Button(role: .destructive) {
-                                        store.remove(task)
-                                    } label: { Label("Delete", systemImage: "trash") }
-                                }
+                        // Active (to-do) tasks
+                        Section {
+                            ForEach(store.tasks.filter { !$0.isDone }) { task in
+                                TaskRow(task: task,
+                                        onToggle: { store.toggle(task) },
+                                        onOpenDetails: {
+                                            detailTask = task
+                                            detailEditedTitle = task.title
+                                            detailEditedDetails = task.details ?? ""
+                                        })
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                        Button(role: .destructive) {
+                                            store.remove(task)
+                                        } label: { Label("Delete", systemImage: "trash") }
+                                    }
+                                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                    .listRowBackground(Color.clear)
+                            }
+                        } header: {
+                            Text("To Do")
+                        } footer: {
+                            Text("Tap a task to view or edit details.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
                         }
-                        .onDelete { idxSet in
-                            idxSet.map { store.tasks[$0] }.forEach { store.remove($0) }
+
+                        // Completed (collapsible)
+                        if !store.tasks.filter({ $0.isDone }).isEmpty {
+                            Section {
+                                if showCompletedSection {
+                                    ForEach(store.tasks.filter { $0.isDone }) { task in
+                                        TaskRow(task: task,
+                                                onToggle: { store.toggle(task) },
+                                                onOpenDetails: {
+                                                    detailTask = task
+                                                    detailEditedTitle = task.title
+                                                    detailEditedDetails = task.details ?? ""
+                                                })
+                                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                                Button(role: .destructive) {
+                                                    store.remove(task)
+                                                } label: { Label("Delete", systemImage: "trash") }
+                                            }
+                                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                            .listRowBackground(Color.clear)
+                                    }
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                                }
+                            } header: {
+                                Button {
+                                    withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+                                        showCompletedSection.toggle()
+                                    }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: showCompletedSection ? "chevron.down" : "chevron.right")
+                                        Text("Completed")
+                                        Spacer()
+                                        Text("\(store.tasks.filter({ $0.isDone }).count)")
+                                            .font(.caption2).bold()
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(
+                                                Capsule().fill(Color(.tertiarySystemFill))
+                                            )
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                     .listStyle(.insetGrouped)
@@ -232,6 +294,12 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("Lock In")
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { hideKeyboard() }
+                }
+            }
         }
         // Polished edit sheet
         .sheet(item: $editingTask) { task in
@@ -264,6 +332,7 @@ struct ContentView: View {
 
 // MARK: - Row
 private struct TaskRow: View {
+    @Environment(\.colorScheme) private var colorScheme
     let task: TaskItem
     let onToggle: () -> Void
     let onOpenDetails: () -> Void
@@ -274,6 +343,8 @@ private struct TaskRow: View {
                 Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
                     .font(.title2)
                     .symbolRenderingMode(.hierarchical)
+                    .imageScale(.large)
+                    .symbolEffect(.bounce, value: task.isDone)
             }
             .buttonStyle(.plain)
 
@@ -286,8 +357,51 @@ private struct TaskRow: View {
             Spacer(minLength: 8)
         }
         .padding(.vertical, 6)
+        .background(
+            .thinMaterial,
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color(.separator).opacity(0.6), lineWidth: 0.5)
+        )
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.06), radius: 12, x: 0, y: 6)
         .contentShape(Rectangle())
         .onTapGesture { onOpenDetails() }
+    }
+}
+
+private struct ProgressHeader: View {
+    let done: Int
+    let total: Int
+    let progress: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Progress", systemImage: "chart.bar.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .labelStyle(.titleAndIcon)
+                Spacer()
+                Text(total > 0 ? "\(Int((progress * 100).rounded()))%" : "0%")
+                    .font(.caption2).monospacedDigit()
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color(.tertiarySystemFill)))
+            }
+            ProgressView(value: progress)
+                .progressViewStyle(.linear)
+        }
+        .padding(12)
+        .background(
+            .thinMaterial,
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color(.separator).opacity(0.6), lineWidth: 0.5)
+        )
+        .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 6)
     }
 }
 
@@ -305,7 +419,6 @@ private struct EditTaskSheetModern: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     TextField("Task title", text: $title)
-                        .textInputAutocapitalization(.sentences)
                         .autocorrectionDisabled(false)
                         .padding(12)
                         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -341,6 +454,7 @@ private struct TaskDetailsSheet: View {
     var onSave: () -> Void
 
     @State private var editorHeight: CGFloat = 90
+    @State private var detailsIsFocused: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -348,7 +462,6 @@ private struct TaskDetailsSheet: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Title").font(.footnote).foregroundStyle(.secondary)
                     TextField("Task title", text: $title)
-                        .textInputAutocapitalization(.sentences)
                         .autocorrectionDisabled(false)
                         .padding(12)
                         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -359,7 +472,10 @@ private struct TaskDetailsSheet: View {
                     ZStack(alignment: .topLeading) {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .fill(Color(.secondarySystemBackground))
-                        AutoGrowingTextEditor(text: $details, calculatedHeight: $editorHeight)
+                        AutoGrowingTextEditor(text: $details,
+                                              calculatedHeight: $editorHeight,
+                                              isFocused: $detailsIsFocused,
+                                              maxHeight: 240)
                             .padding(8)
                             .frame(height: max(90, editorHeight))
                         if details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -367,6 +483,7 @@ private struct TaskDetailsSheet: View {
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 14)
+                                .allowsHitTesting(false)
                         }
                     }
                     .overlay(
@@ -390,6 +507,14 @@ private struct TaskDetailsSheet: View {
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        hideKeyboard()
+                    }
+                }
+            }
         }
     }
 }
@@ -398,15 +523,25 @@ private struct TaskDetailsSheet: View {
 private struct AutoGrowingTextEditor: UIViewRepresentable {
     @Binding var text: String
     @Binding var calculatedHeight: CGFloat
+    @Binding var isFocused: Bool
+    var maxHeight: CGFloat? = nil
 
     func makeUIView(context: Context) -> UITextView {
         let tv = UITextView()
-        tv.isScrollEnabled = false
+        tv.isScrollEnabled = true
         tv.backgroundColor = .clear
         tv.font = UIFont.preferredFont(forTextStyle: .body)
         tv.delegate = context.coordinator
-        tv.textContainerInset = UIEdgeInsets(top: 2, left: 0, bottom: 2, right: 0)
+        tv.textContainerInset = UIEdgeInsets(top: 11, left: 1, bottom: 2, right: 0)
         tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        tv.keyboardDismissMode = .interactive
+        let tb = UIToolbar()
+        tb.items = [
+            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
+            UIBarButtonItem(title: "Done", style: .done, target: context.coordinator, action: #selector(Coordinator.doneTapped))
+        ]
+        tb.sizeToFit()
+        tv.inputAccessoryView = tb
         return tv
     }
 
@@ -414,35 +549,69 @@ private struct AutoGrowingTextEditor: UIViewRepresentable {
         if uiView.text != text {
             uiView.text = text
         }
-        Self.recalculateHeight(view: uiView, result: $calculatedHeight)
+        if isFocused {
+            if !uiView.isFirstResponder { uiView.becomeFirstResponder() }
+        } else {
+            if uiView.isFirstResponder { uiView.resignFirstResponder() }
+        }
+        Self.recalculateHeight(view: uiView, result: $calculatedHeight, maxHeight: maxHeight)
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, height: $calculatedHeight)
+        Coordinator(text: $text, height: $calculatedHeight, isFocused: $isFocused, maxHeight: maxHeight)
     }
 
-    static func recalculateHeight(view: UITextView, result: Binding<CGFloat>) {
-        let newSize = view.sizeThatFits(CGSize(width: view.bounds.width, height: .greatestFiniteMagnitude))
-        if result.wrappedValue != newSize.height {
+    static func recalculateHeight(view: UITextView, result: Binding<CGFloat>, maxHeight: CGFloat?) {
+        let fitted = view.sizeThatFits(CGSize(width: view.bounds.width, height: .greatestFiniteMagnitude)).height
+        let clamped = maxHeight.map { min(fitted, $0) } ?? fitted
+        if result.wrappedValue != clamped {
             DispatchQueue.main.async {
-                result.wrappedValue = newSize.height
+                result.wrappedValue = clamped
             }
+        }
+        // Only allow internal scrolling when content exceeds the cap
+        if let mh = maxHeight {
+            view.isScrollEnabled = fitted > mh - 0.5
         }
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var text: Binding<String>
         var height: Binding<CGFloat>
+        var isFocused: Binding<Bool>
+        var maxHeight: CGFloat?
 
-        init(text: Binding<String>, height: Binding<CGFloat>) {
+        init(text: Binding<String>, height: Binding<CGFloat>, isFocused: Binding<Bool>, maxHeight: CGFloat?) {
             self.text = text
             self.height = height
+            self.isFocused = isFocused
+            self.maxHeight = maxHeight
         }
 
         func textViewDidChange(_ textView: UITextView) {
             self.text.wrappedValue = textView.text
-            AutoGrowingTextEditor.recalculateHeight(view: textView, result: height)
+            AutoGrowingTextEditor.recalculateHeight(view: textView, result: height, maxHeight: maxHeight)
         }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            isFocused.wrappedValue = true
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            isFocused.wrappedValue = false
+        }
+
+        @objc func doneTapped() {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+    }
+}
+
+private extension View {
+    func hideKeyboard() {
+        #if canImport(UIKit)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        #endif
     }
 }
 
