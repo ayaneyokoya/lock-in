@@ -1,7 +1,3 @@
-//
-//  ContentView.swift
-//
-
 import SwiftUI
 import UIKit
 import FirebaseFirestore
@@ -124,7 +120,6 @@ final class TaskStore: ObservableObject {
         guard let id = task.id else { return }
         guard let uid = uid else { return }
         let trimmed = newDetails.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Allow empty string to clear details
         db.collection("users").document(uid).collection("tasks").document(id).updateData(["details": trimmed]) { err in
             if let err = err { print("Update details failed: \(err)") }
         }
@@ -238,13 +233,11 @@ final class AuthViewModel: ObservableObject {
         }
         guard let user = result?.user else { return }
 
-        // Set displayName
         let change = user.createProfileChangeRequest()
         let fullName = "\(firstName.trimmingCharacters(in: .whitespacesAndNewlines)) \(lastName.trimmingCharacters(in: .whitespacesAndNewlines))".trimmingCharacters(in: .whitespaces)
         change.displayName = fullName
         change.commitChanges(completion: nil)
 
-        // Create/merge a profile document
         let profile: [String: Any] = [
             "firstName": firstName,
             "lastName": lastName,
@@ -302,7 +295,7 @@ struct ContentView: View {
     @State private var detailEditedTitle: String = ""
     @State private var detailEditedDetails: String = ""
 
-    // Controls whether the details box is visible (animated)
+    // Controls whether the details box is visible
     @State private var showDetails: Bool = false
 
     // Progress metrics
