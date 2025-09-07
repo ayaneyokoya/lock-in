@@ -100,13 +100,19 @@ struct GeoPoint: Codable, Equatable {
     var lon: Double
 }
 
-// Distance helper
-func isStillHere(current: CLLocationCoordinate2D?, saved: GeoPoint?, thresholdMeters: Double = 150) -> Bool {
+
+// Distance helper (100 ft default)
+func isStillHere(
+    current: CLLocationCoordinate2D?,
+    saved: GeoPoint?,
+    thresholdMeters: Double = 30.48
+) -> Bool {
     guard let c = current, let s = saved else { return true }
-    let a = CLLocation(latitude: c.latitude, longitude: s.lon)
+    let a = CLLocation(latitude: c.latitude, longitude: c.longitude)
     let b = CLLocation(latitude: s.lat, longitude: s.lon)
     return a.distance(from: b) <= thresholdMeters
 }
+
 
 // Local notifications
 enum Notifier {

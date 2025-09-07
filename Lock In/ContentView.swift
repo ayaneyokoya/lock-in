@@ -11,6 +11,10 @@ struct TaskItem: Identifiable, Codable, Equatable {
     var isDone: Bool = false
     var createdAt: Date = .now
     var details: String? = nil
+    
+    var boundLat: Double?
+    var boundLon: Double?
+    var boundPlace: String?
 
     static func == (lhs: TaskItem, rhs: TaskItem) -> Bool {
         lhs.id == rhs.id &&
@@ -59,13 +63,21 @@ final class TaskStore: ObservableObject {
 
                     let details = data["details"] as? String
 
+                    let boundLat = data["boundLat"] as? Double
+                    let boundLon = data["boundLon"] as? Double
+                    let boundPlace = data["boundPlace"] as? String
+
                     return TaskItem(
                         id: doc.documentID,
                         title: title,
                         isDone: isDone,
                         createdAt: created,
-                        details: details
+                        details: details,
+                        boundLat: boundLat,
+                        boundLon: boundLon,
+                        boundPlace: boundPlace
                     )
+
                 }
             }
     }
@@ -78,7 +90,11 @@ final class TaskStore: ObservableObject {
         listen(for: uid)
     }
 
-    func add(_ title: String, details: String?) {
+    func add(_ title: String,
+             details: String?,
+             boundLat: Double? = nil,
+             boundLon: Double? = nil,
+             boundPlace: String? = nil) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         guard let uid = uid else {
@@ -94,11 +110,16 @@ final class TaskStore: ObservableObject {
         if let d = details?.trimmingCharacters(in: .whitespacesAndNewlines), !d.isEmpty {
             payload["details"] = d
         }
+        if let boundLat { payload["boundLat"] = boundLat }
+        if let boundLon { payload["boundLon"] = boundLon }
+        if let boundPlace, !boundPlace.isEmpty { payload["boundPlace"] = boundPlace }
 
-        db.collection("users").document(uid).collection("tasks").addDocument(data: payload) { err in
-            if let err = err { print("Add failed: \(err)") }
-        }
+        db.collection("users").document(uid).collection("tasks")
+            .addDocument(data: payload) { err in
+                if let err = err { print("Add failed: \(err)") }
+            }
     }
+
     func toggle(_ task: TaskItem) {
         guard let id = task.id else { return }
         guard let uid = uid else { return }
@@ -313,25 +334,14 @@ struct ContentView: View {
     @State private var mustDoHereToggle = false
     @State private var redTaskIDs: Set<String> = []
 
-    // User's “must-do-here” coordinates
-    @State private var hereMap: [String: GeoPoint] = {
-        if let data = UserDefaults.standard.data(forKey: "here_rules_v1"),
-           let map = try? JSONDecoder().decode([String: GeoPoint].self, from: data) {
-            return map
-        }
-        return [:]
-    }()
     // Pre-filtered task arrays
     private var activeTasks: [TaskItem] { store.tasks.filter { !$0.isDone } }
     private var completedTasks: [TaskItem] { store.tasks.filter { $0.isDone } }
-
-
-    private func saveHereMap() {
-        if let data = try? JSONEncoder().encode(hereMap) {
-            UserDefaults.standard.set(data, forKey: "here_rules_v1")
-        }
-    }
     
+    private var boundIDs: Set<String> {
+        Set(store.tasks.compactMap { ($0.boundLat != nil) ? $0.id : nil })
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -390,9 +400,11 @@ struct ContentView: View {
         
         .onReceive(tracker.$coordinate) { coord in
             print("coord update:", String(describing: coord))
-            if let coord {
-                reverseGeocode(coord)
-            }
+            if let coord { reverseGeocode(coord) }  // your nav title name
+            reevaluateHereRulesAndNotify()
+        }
+
+        .onReceive(store.$tasks) { _ in
             reevaluateHereRulesAndNotify()
         }
         
@@ -417,6 +429,7 @@ struct ContentView: View {
                 reverseGeocode(coord)
             }
         }
+    
         .onChange(of: auth.user?.uid) { _, newUid in
             showAuth = (auth.user == nil)
             store.setUser(uid: newUid)
@@ -428,45 +441,61 @@ struct ContentView: View {
     }
 
     private func add() {
-        guard auth.user != nil else {
-            showAuth = true
-            return
-        }
+        guard auth.user != nil else { showAuth = true; return }
         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        let beforeCount = store.tasks.count
-        store.add(trimmed, details: newDetails)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                guard store.tasks.count > beforeCount,
-                      let newTask = store.tasks.last,
-                      let id = newTask.id else { return }
 
-                if mustDoHereToggle, let c = tracker.coordinate {
-                    hereMap[id] = GeoPoint(lat: c.latitude, lon: c.longitude)
-                    saveHereMap()
-                    reevaluateHereRulesAndNotify()
-                }
-            }
+        var place: String? = currentLocationName.isEmpty ? nil : currentLocationName
+        if place == nil, let c = tracker.coordinate {
+            place = String(format: "%.4f, %.4f", c.latitude, c.longitude)
+        }
+
+        if mustDoHereToggle, let c = tracker.coordinate {
+            store.add(
+                trimmed,
+                details: newDetails.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : newDetails,
+                boundLat: c.latitude,
+                boundLon: c.longitude,
+                boundPlace: place
+            )
+        } else {
+            store.add(
+                trimmed,
+                details: newDetails.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : newDetails
+            )
+        }
+
         newTitle = ""
         newDetails = ""
         mustDoHereToggle = false
         isTitleFocused = false
         showDetails = false
     }
-    private func reevaluateHereRulesAndNotify() {
-        guard let coord = tracker.coordinate else { return }
-        var newRed: Set<String> = []
 
-        for t in store.tasks {
-            guard let id = t.id, !t.isDone else { continue }
-            let rule = hereMap[id]
-            let stillHere = isStillHere(current: coord, saved: rule)
-            if rule != nil && !stillHere {
-                newRed.insert(id)
-            }
+
+    private let boundThresholdMeters: Double = 100
+
+    private func isFar(current: CLLocationCoordinate2D?, task: TaskItem) -> Bool {
+        guard
+            let c = current,
+            let lat = task.boundLat,
+            let lon = task.boundLon,
+            task.isDone == false
+        else { return false }
+
+        let here  = CLLocation(latitude: c.latitude, longitude: c.longitude)
+        let there = CLLocation(latitude: lat,       longitude: lon)
+        return here.distance(from: there) > boundThresholdMeters
+    }
+
+    private func reevaluateHereRulesAndNotify() {
+        let cur = tracker.coordinate
+        var next: Set<String> = []
+        for t in store.tasks where !t.isDone {
+            if isFar(current: cur, task: t) { next.insert(t.id ?? "") }
         }
 
-        let newlyRed = newRed.subtracting(redTaskIDs)
+        let newlyRed = next.subtracting(redTaskIDs)
         for id in newlyRed {
             if let t = store.tasks.first(where: { $0.id == id }) {
                 Notifier.send(
@@ -475,8 +504,10 @@ struct ContentView: View {
                 )
             }
         }
-        redTaskIDs = newRed
+
+        redTaskIDs = next
     }
+
     @ViewBuilder private var header: some View {
         if totalCount > 0 {
             ProgressHeader(done: doneCount, total: totalCount, progress: progress)
@@ -564,6 +595,7 @@ struct ContentView: View {
             ActiveTasksSection(
                 tasks: activeTasks,
                 redIDs: redTaskIDs,
+                boundIDs: boundIDs,
                 onToggle: { store.toggle($0) },
                 onDelete: { store.remove($0) },
                 onOpen: { t in
@@ -803,6 +835,7 @@ private struct TaskRow: View {
     let onToggle: () -> Void
     let onOpenDetails: () -> Void
     var isRed: Bool
+    var isBound: Bool = false   // NEW
 
     var body: some View {
         HStack(spacing: 12) {
@@ -815,11 +848,34 @@ private struct TaskRow: View {
             }
             .buttonStyle(.plain)
 
-            Text(task.title)
-                .font(.body)
-                .lineLimit(2)
-                .strikethrough(task.isDone, pattern: .solid, color: .secondary)
-                .foregroundColor(task.isDone ? .secondary : (isRed ? .red : .primary))
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(task.title)
+                        .font(.body)
+                        .lineLimit(2)
+                        .strikethrough(task.isDone, pattern: .solid, color: .secondary)
+                        .foregroundColor(task.isDone ? .secondary : (isRed ? .red : .primary))
+
+                    if let lat = task.boundLat, let lon = task.boundLon {
+                        Image(systemName: "mappin.and.ellipse")
+                            .imageScale(.small)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("Location bound")
+
+                        Text("• \(task.boundPlace ?? String(format: "%.4f, %.4f", lat, lon))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+
+                if isRed {
+                    Text("Away from required location")
+                        .font(.caption2)
+                        .foregroundStyle(.red.opacity(0.85))
+                }
+            }
 
             Spacer(minLength: 8)
         }
@@ -832,11 +888,13 @@ private struct TaskRow: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color(.separator).opacity(0.6), lineWidth: 0.5)
         )
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.06), radius: 12, x: 0, y: 6)
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.06),
+                radius: 12, x: 0, y: 6)
         .contentShape(Rectangle())
         .onTapGesture { onOpenDetails() }
     }
 }
+
 
 private struct ProgressHeader: View {
     let done: Int
@@ -1085,6 +1143,7 @@ private extension View {
 private struct ActiveTasksSection: View {
     let tasks: [TaskItem]
     let redIDs: Set<String>
+    let boundIDs: Set<String>
     let onToggle: (TaskItem) -> Void
     let onDelete: (TaskItem) -> Void
     let onOpen: (TaskItem) -> Void
@@ -1096,7 +1155,8 @@ private struct ActiveTasksSection: View {
                     task: task,
                     onToggle: { onToggle(task) },
                     onOpenDetails: { onOpen(task) },
-                    isRed: redIDs.contains(task.id ?? "")
+                    isRed: redIDs.contains(task.id ?? ""),
+                    isBound: boundIDs.contains(task.id ?? "")
                 )
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) { onDelete(task) } label: {
