@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import FirebaseFirestore
 import FirebaseAuth
+import CoreLocation
 
 // MARK: - Domain Model
 struct TaskItem: Identifiable, Codable, Equatable {
@@ -295,7 +296,7 @@ struct ContentView: View {
     @State private var detailEditedTitle: String = ""
     @State private var detailEditedDetails: String = ""
 
-    // Controls whether the details box is visible
+    // Controls if the details box is visible
     @State private var showDetails: Bool = false
 
     // Progress metrics
@@ -304,173 +305,64 @@ struct ContentView: View {
     private var progress: Double { totalCount == 0 ? 0 : Double(doneCount) / Double(totalCount) }
 
     @State private var showAuth: Bool = false
+    
+    // Location
+    @State private var currentLocationName = ""
+    private let geocoder = CLGeocoder()
+    @StateObject private var tracker = LocationTracker()
+    @State private var mustDoHereToggle = false
+    @State private var redTaskIDs: Set<String> = []
 
+    // User's “must-do-here” coordinates
+    @State private var hereMap: [String: GeoPoint] = {
+        if let data = UserDefaults.standard.data(forKey: "here_rules_v1"),
+           let map = try? JSONDecoder().decode([String: GeoPoint].self, from: data) {
+            return map
+        }
+        return [:]
+    }()
+    // Pre-filtered task arrays
+    private var activeTasks: [TaskItem] { store.tasks.filter { !$0.isDone } }
+    private var completedTasks: [TaskItem] { store.tasks.filter { $0.isDone } }
+
+
+    private func saveHereMap() {
+        if let data = try? JSONEncoder().encode(hereMap) {
+            UserDefaults.standard.set(data, forKey: "here_rules_v1")
+        }
+    }
+    
     var body: some View {
         NavigationStack {
             ZStack {
                 LinearGradient(colors: [Color(.systemBackground), Color(.secondarySystemBackground)],
                                startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
-
+                
                 VStack(spacing: 12) {
-                    if totalCount > 0 {
-                        ProgressHeader(done: doneCount, total: totalCount, progress: progress)
-                            .padding(.horizontal)
-                    }
-                    HStack(spacing: 10) {
-                        TextField("Add a task…", text: $newTitle)
-                            .textFieldStyle(.roundedBorder)
-                            .submitLabel(.done)
-                            .onSubmit(add)
-                            .focused($isTitleFocused)
-                            .onChange(of: newTitle) { oldValue, newValue in
-                                let shouldShow = !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                if shouldShow != showDetails {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        showDetails = shouldShow
-                                    }
-                                }
-                            }
-
-                        Button {
-                            add()
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(.title3.weight(.semibold))
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(newTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 4)
-
-                    Group {
-                        if showDetails {
-                            ZStack(alignment: .topLeading) {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(Color(.secondarySystemBackground))
-                                AutoGrowingTextEditor(text: $newDetails,
-                                                      calculatedHeight: $newDetailsHeight,
-                                                      isFocused: $newDetailsFocused,
-                                                      maxHeight: 140)
-                                    .padding(8)
-                                    .frame(height: max(32, newDetailsHeight))
-                                if newDetails.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                    Text("Add details…")
-                                        .foregroundStyle(.secondary)
-                                        .padding(.horizontal, 14)
-                                        .padding(.vertical, 10)
-                                        .allowsHitTesting(false)
-                                }
-                            }
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .strokeBorder(Color(.tertiaryLabel), lineWidth: 0.5)
-                            )
-                            .padding(.horizontal)
-                            .transition(.opacity)
-                        }
-                    }
-
-                    // Task list
-                    List {
-                        // Active (to-do) tasks
-                        Section {
-                            ForEach(store.tasks.filter { !$0.isDone }) { task in
-                                TaskRow(task: task,
-                                        onToggle: { store.toggle(task) },
-                                        onOpenDetails: {
-                                            detailTask = task
-                                            detailEditedTitle = task.title
-                                            detailEditedDetails = task.details ?? ""
-                                        })
-                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                        Button(role: .destructive) {
-                                            store.remove(task)
-                                        } label: { Label("Delete", systemImage: "trash") }
-                                    }
-                                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                    .listRowBackground(Color.clear)
-                            }
-                        } header: {
-                            Text("To Do")
-                        } footer: {
-                            Text("Tap a task to view or edit details.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        // Completed (collapsible)
-                        if !store.tasks.filter({ $0.isDone }).isEmpty {
-                            Section {
-                                if showCompletedSection {
-                                    ForEach(store.tasks.filter { $0.isDone }) { task in
-                                        TaskRow(task: task,
-                                                onToggle: { store.toggle(task) },
-                                                onOpenDetails: {
-                                                    detailTask = task
-                                                    detailEditedTitle = task.title
-                                                    detailEditedDetails = task.details ?? ""
-                                                })
-                                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                                Button(role: .destructive) {
-                                                    store.remove(task)
-                                                } label: { Label("Delete", systemImage: "trash") }
-                                            }
-                                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                            .listRowBackground(Color.clear)
-                                    }
-                                    .transition(.opacity.combined(with: .move(edge: .top)))
-                                }
-                            } header: {
-                                HStack(spacing: 8) {
-                                    Button {
-                                        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
-                                            showCompletedSection.toggle()
-                                        }
-                                    } label: {
-                                        HStack(spacing: 8) {
-                                            Image(systemName: showCompletedSection ? "chevron.down" : "chevron.right")
-                                            Text("Completed")
-                                        }
-                                    }
-                                    .buttonStyle(.plain)
-
-                                    Spacer()
-
-                                    Text("\(store.tasks.filter({ $0.isDone }).count)")
-                                        .font(.caption2).bold()
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(
-                                            Capsule().fill(Color(.tertiarySystemFill))
-                                        )
-
-                                    Button {
-                                        showClearConfirm = true
-                                    } label: {
-                                        Image(systemName: "trash")
-                                            .imageScale(.medium)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel("Clear completed")
-                                }
-                            }
-                        }
-                    }
-                    .listStyle(.insetGrouped)
-                    .scrollContentBackground(.hidden) // show our gradient instead of list bg
-                    .confirmationDialog("Clear all completed tasks?", isPresented: $showClearConfirm, titleVisibility: .visible) {
-                        Button("Clear All", role: .destructive) { store.clearCompleted() }
-                        Button("Cancel", role: .cancel) {}
-                    }
+                    header
+                    inputRow
+                    detailsBox
+                    taskList
                 }
             }
-            .navigationTitle("Lock In")
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
+                        Text("Lock In")
+                            .font(.headline.weight(.semibold))
+
+                        Text("• \(currentLocationName.isEmpty ? "Locating…" : currentLocationName)")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                    }
+                }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("Done") { hideKeyboard() }
+                    Button("Done") { isTitleFocused = false
+                        newDetailsFocused = false }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     if auth.user != nil {
@@ -478,6 +370,7 @@ struct ContentView: View {
                     }
                 }
             }
+            .navigationBarTitleDisplayMode(.inline)
         }
         .sheet(item: $editingTask) { task in
             EditTaskSheetModern(title: $editedTitle) {
@@ -494,9 +387,35 @@ struct ContentView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
+        
+        .onReceive(tracker.$coordinate) { coord in
+            print("coord update:", String(describing: coord))
+            if let coord {
+                reverseGeocode(coord)
+            }
+            reevaluateHereRulesAndNotify()
+        }
+        
+        .onAppear {
+            if let coord = tracker.coordinate { reverseGeocode(coord) }
+        }
+
+        .onChange(of: store.tasks) { _, _ in
+            reevaluateHereRulesAndNotify()
+        }
+
+        .task {
+            await Notifier.requestAuthorization()
+            tracker.requestAlwaysAuthorization()
+            tracker.kick()
+
+        }
         .onAppear {
             showAuth = auth.user == nil
             store.setUser(uid: auth.user?.uid)
+            if let coord = tracker.coordinate {
+                reverseGeocode(coord)
+            }
         }
         .onChange(of: auth.user?.uid) { _, newUid in
             showAuth = (auth.user == nil)
@@ -515,12 +434,198 @@ struct ContentView: View {
         }
         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let beforeCount = store.tasks.count
         store.add(trimmed, details: newDetails)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                guard store.tasks.count > beforeCount,
+                      let newTask = store.tasks.last,
+                      let id = newTask.id else { return }
+
+                if mustDoHereToggle, let c = tracker.coordinate {
+                    hereMap[id] = GeoPoint(lat: c.latitude, lon: c.longitude)
+                    saveHereMap()
+                    reevaluateHereRulesAndNotify()
+                }
+            }
         newTitle = ""
         newDetails = ""
+        mustDoHereToggle = false
         isTitleFocused = false
         showDetails = false
     }
+    private func reevaluateHereRulesAndNotify() {
+        guard let coord = tracker.coordinate else { return }
+        var newRed: Set<String> = []
+
+        for t in store.tasks {
+            guard let id = t.id, !t.isDone else { continue }
+            let rule = hereMap[id]
+            let stillHere = isStillHere(current: coord, saved: rule)
+            if rule != nil && !stillHere {
+                newRed.insert(id)
+            }
+        }
+
+        let newlyRed = newRed.subtracting(redTaskIDs)
+        for id in newlyRed {
+            if let t = store.tasks.first(where: { $0.id == id }) {
+                Notifier.send(
+                    title: "You left without finishing... 🥲",
+                    body: "“\(t.title)” was marked to do before leaving."
+                )
+            }
+        }
+        redTaskIDs = newRed
+    }
+    @ViewBuilder private var header: some View {
+        if totalCount > 0 {
+            ProgressHeader(done: doneCount, total: totalCount, progress: progress)
+                .padding(.horizontal)
+        }
+    }
+
+    @ViewBuilder private var inputRow: some View {
+        HStack(spacing: 10) {
+            TextField("Add a task…", text: $newTitle)
+                .textFieldStyle(.roundedBorder)
+                .submitLabel(.done)
+                .onSubmit(add)
+                .focused($isTitleFocused)
+                .onChange(of: newTitle) { oldValue, newValue in
+                    let shouldShow = !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    if shouldShow != showDetails {
+                        withAnimation(.easeInOut(duration: 0.2)) { showDetails = shouldShow }
+                    }
+                }
+
+            Button { add() } label: {
+                Image(systemName: "plus").font(.title3.weight(.semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(newTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .padding(.horizontal)
+        .padding(.top, 4)
+        
+        Toggle(isOn: $mustDoHereToggle) {
+            HStack(alignment: .center, spacing: 4) {
+                Image(systemName: "mappin.and.ellipse")
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Location Feature")
+                        .font(.headline)
+
+                    Text("Complete before leaving current location")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
+                }
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    @ViewBuilder private var detailsBox: some View {
+        if showDetails {
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+                AutoGrowingTextEditor(text: $newDetails,
+                                      calculatedHeight: $newDetailsHeight,
+                                      isFocused: $newDetailsFocused,
+                                      maxHeight: 140)
+                    .padding(8)
+                    .frame(height: max(32, newDetailsHeight))
+                if newDetails.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("Add details…")
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .allowsHitTesting(false)
+                }
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color(.tertiaryLabel), lineWidth: 0.5)
+            )
+            .padding(.horizontal)
+            .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder private var taskList: some View {
+        List {
+            Section {
+                QuoteCardView().listRowBackground(Color.clear)
+            }
+
+            ActiveTasksSection(
+                tasks: activeTasks,
+                redIDs: redTaskIDs,
+                onToggle: { store.toggle($0) },
+                onDelete: { store.remove($0) },
+                onOpen: { t in
+                    detailTask = t
+                    detailEditedTitle = t.title
+                    detailEditedDetails = t.details ?? ""
+                }
+            )
+
+            if !completedTasks.isEmpty {
+                CompletedTasksSection(
+                    tasks: completedTasks,
+                    isExpanded: $showCompletedSection,
+                    onToggle: { store.toggle($0) },
+                    onDelete: { store.remove($0) },
+                    onOpen: { t in
+                        detailTask = t
+                        detailEditedTitle = t.title
+                        detailEditedDetails = t.details ?? ""
+                    },
+                    onClear: { showClearConfirm = true }
+                )
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .confirmationDialog(
+            "Clear all completed tasks?",
+            isPresented: $showClearConfirm,
+            titleVisibility: .visible
+        )
+        {
+            Button("Clear All", role: .destructive) { store.clearCompleted() }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+    private func reverseGeocode(_ coord: CLLocationCoordinate2D) {
+        let loc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+        geocoder.cancelGeocode()
+        geocoder.reverseGeocodeLocation(loc) { placemarks, error in
+            if let error {
+                print("Reverse geocode error:", error.localizedDescription)
+            }
+
+            if let p = placemarks?.first {
+                let neighborhood = p.subLocality
+                let city = p.locality ?? p.administrativeArea ?? p.country
+                let composed = [neighborhood, city].compactMap { $0 }.joined(separator: ", ")
+                DispatchQueue.main.async {
+                    self.currentLocationName = composed.isEmpty ? (p.name ?? city ?? "") : composed
+                }
+            } else {
+                let lat = String(format: "%.4f", coord.latitude)
+                let lon = String(format: "%.4f", coord.longitude)
+                DispatchQueue.main.async {
+                    self.currentLocationName = "\(lat), \(lon)"
+                }
+            }
+        }
+    }
+
+
 }
 
 // MARK: - Auth Sheet UI
@@ -697,6 +802,7 @@ private struct TaskRow: View {
     let task: TaskItem
     let onToggle: () -> Void
     let onOpenDetails: () -> Void
+    var isRed: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -713,7 +819,7 @@ private struct TaskRow: View {
                 .font(.body)
                 .lineLimit(2)
                 .strikethrough(task.isDone, pattern: .solid, color: .secondary)
-                .foregroundStyle(task.isDone ? .secondary : .primary)
+                .foregroundColor(task.isDone ? .secondary : (isRed ? .red : .primary))
 
             Spacer(minLength: 8)
         }
@@ -973,6 +1079,102 @@ private extension View {
         #if canImport(UIKit)
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         #endif
+    }
+}
+
+private struct ActiveTasksSection: View {
+    let tasks: [TaskItem]
+    let redIDs: Set<String>
+    let onToggle: (TaskItem) -> Void
+    let onDelete: (TaskItem) -> Void
+    let onOpen: (TaskItem) -> Void
+
+    var body: some View {
+        Section {
+            ForEach(tasks) { task in
+                TaskRow(
+                    task: task,
+                    onToggle: { onToggle(task) },
+                    onOpenDetails: { onOpen(task) },
+                    isRed: redIDs.contains(task.id ?? "")
+                )
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) { onDelete(task) } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                .listRowBackground(Color.clear)
+            }
+        } header: {
+            Text("To Do")
+        } footer: {
+            Text("Tap a task to view or edit details.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct CompletedTasksSection: View {
+    let tasks: [TaskItem]
+    @Binding var isExpanded: Bool
+    let onToggle: (TaskItem) -> Void
+    let onDelete: (TaskItem) -> Void
+    let onOpen: (TaskItem) -> Void
+    let onClear: () -> Void
+
+    var body: some View {
+        Section {
+            if isExpanded {
+                ForEach(tasks) { task in
+                    TaskRow(
+                        task: task,
+                        onToggle: { onToggle(task) },
+                        onOpenDetails: { onOpen(task) },
+                        isRed: false
+                    )
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) { onDelete(task) } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                    .listRowBackground(Color.clear)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        } header: {
+            HStack(spacing: 8) {
+                Button {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        Text("Completed")
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Text("\(tasks.count)")
+                    .font(.caption2).bold()
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color(.tertiarySystemFill)))
+
+                Button {
+                    onClear()
+                } label: {
+                    Image(systemName: "trash").imageScale(.medium)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear completed")
+            }
+        }
     }
 }
 
