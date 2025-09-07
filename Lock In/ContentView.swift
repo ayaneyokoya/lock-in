@@ -11,6 +11,8 @@ struct TaskItem: Identifiable, Codable, Equatable {
     var isDone: Bool = false
     var createdAt: Date = .now
     var details: String? = nil
+    var category: String? = nil
+    var dueDate: Date? = nil
     
     var boundLat: Double?
     var boundLon: Double?
@@ -21,7 +23,9 @@ struct TaskItem: Identifiable, Codable, Equatable {
         lhs.title == rhs.title &&
         lhs.isDone == rhs.isDone &&
         lhs.createdAt == rhs.createdAt &&
-        lhs.details == rhs.details
+        lhs.details == rhs.details &&
+        lhs.category == rhs.category &&
+        lhs.dueDate == rhs.dueDate
     }
 }
 
@@ -62,6 +66,8 @@ final class TaskStore: ObservableObject {
                     }
 
                     let details = data["details"] as? String
+                    let category = data["category"] as? String
+                    let dueDate = (data["dueDate"] as? Timestamp)?.dateValue()
 
                     let boundLat = data["boundLat"] as? Double
                     let boundLon = data["boundLon"] as? Double
@@ -73,11 +79,18 @@ final class TaskStore: ObservableObject {
                         isDone: isDone,
                         createdAt: created,
                         details: details,
+                        category: category,
+                        dueDate: dueDate,
                         boundLat: boundLat,
                         boundLon: boundLon,
                         boundPlace: boundPlace
                     )
-
+                }
+                .sorted { lhs, rhs in
+                    let lDue = lhs.dueDate ?? .distantFuture
+                    let rDue = rhs.dueDate ?? .distantFuture
+                    if lDue != rDue { return lDue < rDue }
+                    return lhs.createdAt < rhs.createdAt
                 }
             }
     }
@@ -92,6 +105,8 @@ final class TaskStore: ObservableObject {
 
     func add(_ title: String,
              details: String?,
+             category: String?,
+             dueDate: Date?,
              boundLat: Double? = nil,
              boundLon: Double? = nil,
              boundPlace: String? = nil) {
@@ -110,6 +125,8 @@ final class TaskStore: ObservableObject {
         if let d = details?.trimmingCharacters(in: .whitespacesAndNewlines), !d.isEmpty {
             payload["details"] = d
         }
+        if let c = category, !c.isEmpty { payload["category"] = c }          // NEW
+        if let dd = dueDate { payload["dueDate"] = Timestamp(date: dd) }
         if let boundLat { payload["boundLat"] = boundLat }
         if let boundLon { payload["boundLon"] = boundLon }
         if let boundPlace, !boundPlace.isEmpty { payload["boundPlace"] = boundPlace }
@@ -308,6 +325,16 @@ struct ContentView: View {
     @State private var showCompletedSection: Bool = false
     @State private var showClearConfirm: Bool = false
     @State private var newDetailsFocused: Bool = false
+    // Category selection
+    @State private var selectedCategory: String = "Personal"
+    private let categories = ["Personal", "Work", "School", "Errands"]
+
+    // Due Date
+    @State private var hasDueDate: Bool = false
+    @State private var selectedDueDate: Date = Date()
+
+    // Category Filter (nil = All tasks)
+    @State private var selectedFilterCategory: String? = nil
 
     // Editing state
     @State private var editingTask: TaskItem? = nil
@@ -454,6 +481,8 @@ struct ContentView: View {
             store.add(
                 trimmed,
                 details: newDetails.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : newDetails,
+                category: selectedCategory,
+                dueDate: hasDueDate ? selectedDueDate : nil,
                 boundLat: c.latitude,
                 boundLon: c.longitude,
                 boundPlace: place
@@ -461,7 +490,9 @@ struct ContentView: View {
         } else {
             store.add(
                 trimmed,
-                details: newDetails.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : newDetails
+                details: newDetails.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : newDetails,
+                category: selectedCategory,
+                dueDate: hasDueDate ? selectedDueDate : nil
             )
         }
 
@@ -470,6 +501,8 @@ struct ContentView: View {
         mustDoHereToggle = false
         isTitleFocused = false
         showDetails = false
+        hasDueDate = false
+        selectedDueDate = Date()
     }
 
 
@@ -583,6 +616,42 @@ struct ContentView: View {
             )
             .padding(.horizontal)
             .transition(.opacity)
+
+            // Category
+            HStack {
+                Text("Category")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Picker("Category", selection: $selectedCategory) {
+                    ForEach(categories, id: \.self) { Text($0).tag($0) }
+                }
+                .pickerStyle(.menu)
+            }
+            .padding(.horizontal)
+
+            // Due Date toggle
+            Toggle("Add Due Date", isOn: $hasDueDate)
+                .padding(.horizontal)
+                .padding(.top, 2)
+
+            // Date & time picker (shown only if toggle is ON)
+            if hasDueDate {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Due Date")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    DatePicker(
+                        "Select Due Date",
+                        selection: $selectedDueDate,
+                        displayedComponents: [.date, .hourAndMinute]
+                    )
+                    .datePickerStyle(.compact)
+                }
+                .padding(.horizontal)
+            }
+
+            // ▲▲▲ End of inserted block ▲▲▲
         }
     }
 
@@ -848,20 +917,33 @@ private struct TaskRow: View {
             }
             .buttonStyle(.plain)
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(task.title)
-                        .font(.body)
-                        .lineLimit(2)
-                        .strikethrough(task.isDone, pattern: .solid, color: .secondary)
-                        .foregroundColor(task.isDone ? .secondary : (isRed ? .red : .primary))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(task.title)
+                    .font(.body)
+                    .lineLimit(2)
+                    .strikethrough(task.isDone, pattern: .solid, color: .secondary)
+                    .foregroundColor(task.isDone ? .secondary : (isRed ? .red : .primary))
+                //  Category, Due Date,
+                HStack(spacing: 8) {
+                    if let category = task.category, !category.isEmpty {
+                        Text(category)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let due = task.dueDate {
+                        Text("Due: \(due.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
-                    if let lat = task.boundLat, let lon = task.boundLon {
+                if let lat = task.boundLat, let lon = task.boundLon {
+                    HStack(spacing: 4) {
                         Image(systemName: "mappin.and.ellipse")
                             .imageScale(.small)
                             .foregroundStyle(.secondary)
                             .accessibilityLabel("Location bound")
-
+                        
                         Text("• \(task.boundPlace ?? String(format: "%.4f, %.4f", lat, lon))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
