@@ -35,7 +35,7 @@ final class MotivationQuoteFetch: ObservableObject {
     }
     
     private func makeURL() -> URL {
-        URL(string: "https://dummyjson.com/quotes/random")!
+        URL(string: "https://quotes-nine-livid.vercel.app/api/quote")!
     }
     
     private func fetchQuote() async {
@@ -70,7 +70,7 @@ struct QuoteCardView: View {
             } else if let q = vm.quoteModel {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("Quote of the Day")
+                        Text("Motivation Quote")
                             .font(.headline)
                         Spacer()
                         Button { vm.refresh() } label: {
