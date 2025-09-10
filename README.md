@@ -8,6 +8,11 @@ LockIn is a simple to-do list app built with SwiftUI. It uses Firebase to save t
 
 https://github.com/user-attachments/assets/2743f9d9-7dce-45ae-a25b-f1db3f23fd2a
 
+Additional features demo:
+https://github.com/user-attachments/assets/a208e28a-e734-47d6-ac4b-32d58ed8ca14
+
+
+
 
 ## Prerequisites
 - Xcode 15+ (with SwiftUI).
